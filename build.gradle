@@ -9,9 +9,10 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+        classpath "org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}"
         classpath "gradle.plugin.com.stefletcher.gradle-javabase-plugin:javabaseplugin:1.0.13"
 		classpath "gradle.plugin.com.iadams.gradle:gradle-openshift-plugin:0.1-RC1"
+		classpath "se.transmode.gradle:gradle-docker:1.2"
     }
 }
 
@@ -20,13 +21,14 @@ apply plugin: 'eclipse'
 apply plugin: 'org.springframework.boot'
 apply plugin: 'idea'
 apply plugin: 'com.iadams.openshift-base'
+apply plugin: 'docker'
 
-version = '0.0.1-SNAPSHOT'
+version = "${System.env.TRAVIS_BUILD_NUMBER}".length() < 1 ? "1.0.$System.env.TRAVIS_BUILD_NUMBER" : '0.0.1-SNAPSHOT'
 sourceCompatibility = 1.8
 
 jar {
 	baseName = 'openshift-springboot-gradle'
-	version = "1.0.$System.env.TRAVIS_BUILD_NUMBER"
+	version = "$version"
 }
 
 repositories {
@@ -37,4 +39,32 @@ repositories {
 dependencies {
 	compile('org.springframework.boot:spring-boot-starter-web')
 	testCompile('org.springframework.boot:spring-boot-starter-test')
+}
+
+task createDockerFile(){
+	doLast {
+		File dockerfile = new File("openshift/build/Dockerfile")
+		dockerfile.text = """
+FROM java:8
+ADD $jar.archiveName app.jar
+RUN bash -c 'touch /app.jar'
+ENTRYPOINT ["java","-Djava.security.egd=file:/dev/./urandom","-jar","/app.jar"]
+"""
+	}
+}
+
+task copyJar(type: Copy){
+	from("build/tmp/$jar.archiveName")
+	into('openshift/build/')
+}
+
+task buildDocker(type: Docker, dependsOn: [build, copyJar, createDockerFile]) {
+  applicationName = jar.baseName
+  dockerfile = file('openshift/build/Dockerfile')
+  doFirst {
+    copy {
+      from jar
+      into stageDir
+    }
+  }
 }

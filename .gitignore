@@ -27,3 +27,8 @@ nbdist/
 # vs code
 .vscode/
 bin/
+
+# openshift
+
+
+oc_commands.sh
