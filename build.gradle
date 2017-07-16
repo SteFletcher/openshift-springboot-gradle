@@ -109,6 +109,7 @@ task startBuild(type: com.iadams.gradle.openshift.tasks.OpenShiftStartBuildTask,
 
 //startBuild.finalizedBy tagBuild
 
+import io.fabric8.kubernetes.api.model.ContainerPort
 import io.fabric8.openshift.api.model.DeploymentConfigBuilder
 import io.fabric8.openshift.api.model.DeploymentTriggerPolicyBuilder
 
@@ -123,15 +124,18 @@ task createDeployment(type: com.iadams.gradle.openshift.tasks.OpenShiftCreateDep
 					.withTriggers(new DeploymentTriggerPolicyBuilder().withType('ConfigChange').build())
 					.addToSelector('app',"$rootProject.name")
 					.withNewTemplate()
-					.withNewMetadata()
-						.addToLabels('app', "$rootProject.name")
-					.endMetadata()
-					.withNewSpec()
-						.addNewContainer()
-							.withName("$rootProject.name")
-							.withImage("172.30.1.1:5000/bootshift/mvc-app:$version")
-						.endContainer()
-					.endSpec()
+						.withNewMetadata()
+							.addToLabels('app', "$rootProject.name")
+						.endMetadata()
+						.withNewSpec()
+							.addNewContainer()
+								.withName("$rootProject.name")
+								.withImage("172.30.1.1:5000/bootshift/mvc-app:$version")
+								.addNewPort()
+									.withContainerPort(8280)
+								.endPort()
+							.endContainer()
+						.endSpec()
 					.endTemplate()
 				.endSpec()
 				.withNewStatus()
@@ -140,7 +144,30 @@ task createDeployment(type: com.iadams.gradle.openshift.tasks.OpenShiftCreateDep
 				.build()
 }
 
+import io.fabric8.openshift.api.model.ImageStream
+import io.fabric8.openshift.api.model.ImageStreamList
+
 task deploy(type: com.iadams.gradle.openshift.tasks.OpenShiftStartDeploymentTask, dependsOn: createDeployment) {
 	namespace = "$project.ext.namespace"
 	deployment = "$rootProject.name"
+
+	doLast {
+		ImageStreamList list = client.imageStreams().list()
+		if (list == null) {
+			System.out.println("ERROR no list returned!")
+			return;
+		}
+		List<ImageStream> items = list.getItems()
+		for (ImageStream item : items) {
+			System.out.println("ImageStream " + item.getMetadata().getName() + " has version: " + item.getApiVersion())
+		}
+	}
+}
+
+task createService() {
+	// oc create service clusterip openshift-springboot-gradle --tcp=8280:8280 bootshift-mvc
+}
+
+task createRoute() {
+//	oc expose svc openshift-springboot-gradle
 }
