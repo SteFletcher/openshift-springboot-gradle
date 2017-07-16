@@ -23,11 +23,11 @@ apply plugin: 'idea'
 apply plugin: 'com.iadams.openshift-base'
 apply plugin: 'docker'
 
-version = "${System.env.TRAVIS_BUILD_NUMBER}".length() < 1 ? "1.0.$System.env.TRAVIS_BUILD_NUMBER" : '0.0.1-SNAPSHOT'
+version = "${System.env.TRAVIS_BUILD_NUMBER}".length() < 1 ? "1.0.$System.env.TRAVIS_BUILD_NUMBER" : '0.0.3-SNAPSHOT'
 sourceCompatibility = 1.8
 
 jar {
-	baseName = 'openshift-springboot-gradle'
+	baseName = "$rootProject.name"
 	version = "$version"
 }
 
@@ -41,11 +41,25 @@ dependencies {
 	testCompile('org.springframework.boot:spring-boot-starter-test')
 }
 
+// openshift {
+// 	baseUrl = "${baseUrl}"
+// 	auth {
+// 		username = "${openshift_user}"
+// 		password = "${openshift_password}"
+// 	}
+// }
+openshift {
+	baseUrl = 'https://192.168.99.100:8443'
+	auth {
+		username = 'developer'
+		password = 'developer'
+	}
+
+}
 task createDockerFile(){
 	doLast {
-		File dockerfile = new File("openshift/build/Dockerfile")
-		dockerfile.text = """
-FROM java:8
+		File dockerfile = new File("build/openshift/Dockerfile")
+		dockerfile.text = """FROM java:8
 ADD $jar.archiveName app.jar
 RUN bash -c 'touch /app.jar'
 ENTRYPOINT ["java","-Djava.security.egd=file:/dev/./urandom","-jar","/app.jar"]
@@ -54,17 +68,79 @@ ENTRYPOINT ["java","-Djava.security.egd=file:/dev/./urandom","-jar","/app.jar"]
 }
 
 task copyJar(type: Copy){
-	from("build/tmp/$jar.archiveName")
-	into('openshift/build/')
+	from("build/libs/$jar.archiveName")
+	into('build/openshift/')
 }
 
 task buildDocker(type: Docker, dependsOn: [build, copyJar, createDockerFile]) {
   applicationName = jar.baseName
-  dockerfile = file('openshift/build/Dockerfile')
+  dockerfile = file('build/openshift/Dockerfile')
   doFirst {
     copy {
       from jar
       into stageDir
     }
   }
+}
+
+task createBuildTarBall(type: Tar, dependsOn: [build, copyJar, createDockerFile]) {
+  from files('build/openshift/') {
+	  include "**/Dockerfile", "**/*.jar"
+  }
+  destinationDir = file('build/openshift/')
+  archiveName = 'build.tar.gz'
+  compression = Compression.GZIP
+}
+
+project.ext.namespace = 'bootshift'
+
+task startBuild(type: com.iadams.gradle.openshift.tasks.OpenShiftStartBuildTask, dependsOn: createBuildTarBall) {
+	namespace = "$project.ext.namespace"
+	watch = true
+	buildName = 'mvc-app'
+	dockerTar = file('build/openshift/build.tar.gz')
+}
+
+//task tagBuild(type: com.iadams.gradle.openshift.tasks.OpenShiftTagTask) {
+//	namespace = "$project.ext.namespace"
+//	imageName = 'mvc-app'
+//	tag = "$version"
+//}
+
+//startBuild.finalizedBy tagBuild
+
+import io.fabric8.openshift.api.model.DeploymentConfigBuilder
+import io.fabric8.openshift.api.model.DeploymentTriggerPolicyBuilder
+
+task createDeployment(type: com.iadams.gradle.openshift.tasks.OpenShiftCreateDeploymentTask) {
+	namespace = "$project.ext.namespace"
+	deployment = new DeploymentConfigBuilder()
+				.withNewMetadata()
+					.withName("$rootProject.name")
+				.endMetadata()
+				.withNewSpec()
+					.withReplicas(1)
+					.withTriggers(new DeploymentTriggerPolicyBuilder().withType('ConfigChange').build())
+					.addToSelector('app',"$rootProject.name")
+					.withNewTemplate()
+					.withNewMetadata()
+						.addToLabels('app', "$rootProject.name")
+					.endMetadata()
+					.withNewSpec()
+						.addNewContainer()
+							.withName("$rootProject.name")
+							.withImage("172.30.1.1:5000/bootshift/mvc-app:$version")
+						.endContainer()
+					.endSpec()
+					.endTemplate()
+				.endSpec()
+				.withNewStatus()
+					.withLatestVersion(0L)
+				.endStatus()
+				.build()
+}
+
+task deploy(type: com.iadams.gradle.openshift.tasks.OpenShiftStartDeploymentTask, dependsOn: createDeployment) {
+	namespace = "$project.ext.namespace"
+	deployment = "$rootProject.name"
 }
