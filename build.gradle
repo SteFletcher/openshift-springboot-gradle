@@ -152,15 +152,31 @@ task deploy(type: com.iadams.gradle.openshift.tasks.OpenShiftStartDeploymentTask
 	deployment = "$rootProject.name"
 
 	doLast {
-		ImageStreamList list = client.imageStreams().list()
-		if (list == null) {
-			System.out.println("ERROR no list returned!")
-			return;
-		}
-		List<ImageStream> items = list.getItems()
-		for (ImageStream item : items) {
-			System.out.println("ImageStream " + item.getMetadata().getName() + " has version: " + item.getApiVersion())
-		}
+		client.services().inNamespace("$project.ext.namespace").withName("$rootProject.name").createOrReplaceWithNew()
+				.withNewMetadata()
+					.withName("$rootProject.name")
+				.endMetadata()
+				.withNewSpec()
+					.withPorts()
+						.addNewPort()
+							.withName("8280-8280")
+							.withPort(8280)
+							.withNewTargetPort(8280)
+						.endPort()
+					.addToSelector("app", "$rootProject.name")
+					.endSpec().done()
+
+		client.routes().inNamespace("$project.ext.namespace").withName("${rootProject.name}2").createOrReplaceWithNew()
+				.withNewMetadata()
+					.withName("${rootProject.name}2")
+					.withNamespace("$project.ext.namespace")
+				.endMetadata()
+				.withNewSpec()
+					.withNewTo()
+						.withKind("Service")
+						.withName("$rootProject.name")
+					.endTo()
+				.endSpec().done()
 	}
 }
 
