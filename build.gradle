@@ -38,6 +38,10 @@ repositories {
 
 dependencies {
 	compile('org.springframework.boot:spring-boot-starter-web')
+	// https://mvnrepository.com/artifact/com.hazelcast/hazelcast
+	compile group: 'com.hazelcast', name: 'hazelcast', version: '3.9.3'
+	// https://mvnrepository.com/artifact/com.hazelcast/hazelcast-client
+    compile group: 'com.hazelcast', name: 'hazelcast-client', version: '3.9.3'
 	testCompile('org.springframework.boot:spring-boot-starter-test')
 }
 
@@ -92,7 +96,7 @@ task createBuildTarBall(type: Tar, dependsOn: [build, copyJar, createDockerFile]
   compression = Compression.GZIP
 }
 
-project.ext.namespace = 'bootshift'
+project.ext.namespace = project.ext.namespace ?: "myproject"
 
 task startBuild(type: com.iadams.gradle.openshift.tasks.OpenShiftStartBuildTask, dependsOn: createBuildTarBall) {
 	namespace = "$project.ext.namespace"
@@ -115,22 +119,23 @@ import io.fabric8.openshift.api.model.DeploymentTriggerPolicyBuilder
 
 task createDeployment(type: com.iadams.gradle.openshift.tasks.OpenShiftCreateDeploymentTask) {
 	namespace = "$project.ext.namespace"
+	def deploymentName = project.ext.dcname ?: "$rootProject.name"
 	deployment = new DeploymentConfigBuilder()
 				.withNewMetadata()
-					.withName("$rootProject.name")
+					.withName("$deploymentName")
 				.endMetadata()
 				.withNewSpec()
 					.withReplicas(1)
 					.withTriggers(new DeploymentTriggerPolicyBuilder().withType('ConfigChange').build())
-					.addToSelector('app',"$rootProject.name")
+					.addToSelector('app',"$deploymentName")
 					.withNewTemplate()
 						.withNewMetadata()
-							.addToLabels('app', "$rootProject.name")
+							.addToLabels('app', "$deploymentName")
 						.endMetadata()
 						.withNewSpec()
 							.addNewContainer()
-								.withName("$rootProject.name")
-								.withImage("172.30.1.1:5000/bootshift/mvc-app:$version")
+								.withName("$deploymentName")
+								.withImage("172.30.1.1:5000/${namespace}/mvc-app:$version")
 								.addNewPort()
 									.withContainerPort(8280)
 								.endPort()
@@ -146,12 +151,13 @@ task createDeployment(type: com.iadams.gradle.openshift.tasks.OpenShiftCreateDep
 
 task deploy(type: com.iadams.gradle.openshift.tasks.OpenShiftStartDeploymentTask, dependsOn: createDeployment) {
 	namespace = "$project.ext.namespace"
-	deployment = "$rootProject.name"
-
+	deployment = project.ext.dcname ?: "$rootProject.name"
+	
 	doLast {
-		client.services().inNamespace("$project.ext.namespace").withName("$rootProject.name").createOrReplaceWithNew()
+		println deployment
+		client.services().inNamespace("$project.ext.namespace").withName("${deployment}").createOrReplaceWithNew()
 				.withNewMetadata()
-					.withName("$rootProject.name")
+					.withName("${deployment}")
 				.endMetadata()
 				.withNewSpec()
 					.withPorts()
@@ -160,18 +166,18 @@ task deploy(type: com.iadams.gradle.openshift.tasks.OpenShiftStartDeploymentTask
 							.withPort(8280)
 							.withNewTargetPort(8280)
 						.endPort()
-					.addToSelector("app", "$rootProject.name")
+					.addToSelector("app", "${deployment}")
 					.endSpec().done()
-
-		client.routes().inNamespace("$project.ext.namespace").withName("${rootProject.name}2").createOrReplaceWithNew()
+		println deployment
+		client.routes().inNamespace("$project.ext.namespace").withName("${deployment}").createOrReplaceWithNew()
 				.withNewMetadata()
-					.withName("${rootProject.name}2")
+					.withName("${deployment}")
 					.withNamespace("$project.ext.namespace")
 				.endMetadata()
 				.withNewSpec()
 					.withNewTo()
 						.withKind("Service")
-						.withName("$rootProject.name")
+						.withName("${deployment}")
 					.endTo()
 				.endSpec().done()
 	}
